@@ -59,6 +59,10 @@ import qualtran.bloqs.basic_gates.t_gate_test
 import qualtran.bloqs.basic_gates.toffoli_test
 import qualtran.bloqs.basic_gates.x_basis_test
 import qualtran.bloqs.basic_gates.z_basis_test
+import qualtran.bloqs.chemistry.pbc.first_quantization.prepare_t_test
+import qualtran.bloqs.chemistry.pbc.first_quantization.prepare_uv_test
+import qualtran.bloqs.chemistry.pbc.first_quantization.select_t_test
+import qualtran.bloqs.chemistry.pbc.first_quantization.select_uv_test
 import qualtran.bloqs.chemistry.sparse.prepare_test
 import qualtran.bloqs.chemistry.sparse.select_test
 import qualtran.bloqs.chemistry.thc.prepare_test
@@ -66,8 +70,6 @@ import qualtran.bloqs.chemistry.thc.select_test
 import qualtran.bloqs.factoring.mod_exp
 import qualtran.bloqs.factoring.mod_exp_test
 import qualtran.bloqs.factoring.mod_mul_test
-import qualtran.bloqs.sorting
-import qualtran.bloqs.sorting_test
 import qualtran.bloqs.swap_network
 import qualtran.bloqs.swap_network_test
 
@@ -127,15 +129,6 @@ NOTEBOOK_SPECS: List[NotebookSpec] = [
         directory=f'{SOURCE_DIR}/bloqs',
     ),
     NotebookSpec(
-        title='Sorting',
-        module=qualtran.bloqs.sorting,
-        gate_specs=[
-            BloqNbSpec(qualtran.bloqs.sorting_test._make_comparator),
-            BloqNbSpec(qualtran.bloqs.sorting_test._make_bitonic_sort),
-        ],
-        directory=f'{SOURCE_DIR}/bloqs',
-    ),
-    NotebookSpec(
         title='Modular arithmetic',
         module=qualtran.bloqs.factoring,
         path_stem='ref-factoring',
@@ -163,6 +156,25 @@ NOTEBOOK_SPECS: List[NotebookSpec] = [
             BloqNbSpec(qualtran.bloqs.chemistry.sparse.select_test._make_sparse_select),
         ],
         directory=f'{SOURCE_DIR}/bloqs/chemistry/sparse',
+    ),
+    NotebookSpec(
+        title='First Quantization',
+        module=qualtran.bloqs.chemistry.pbc.first_quantization,
+        gate_specs=[
+            BloqNbSpec(
+                qualtran.bloqs.chemistry.pbc.first_quantization.select_t_test._make_select_t
+            ),
+            BloqNbSpec(
+                qualtran.bloqs.chemistry.pbc.first_quantization.select_uv_test._make_select_uv
+            ),
+            BloqNbSpec(
+                qualtran.bloqs.chemistry.pbc.first_quantization.prepare_t_test._make_prepare_t
+            ),
+            BloqNbSpec(
+                qualtran.bloqs.chemistry.pbc.first_quantization.prepare_uv_test._make_prepare_uv
+            ),
+        ],
+        directory=f'{SOURCE_DIR}/bloqs/chemistry/pbc/first_quantization',
     ),
 ]
 
