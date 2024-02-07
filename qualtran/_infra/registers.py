@@ -16,10 +16,13 @@
 import enum
 import itertools
 from collections import defaultdict
-from typing import Dict, Iterable, Iterator, List, overload, Tuple
+from typing import Dict, Iterable, Iterator, List, overload, Tuple, Union
 
+import attrs
 import numpy as np
 from attrs import field, frozen
+
+from .data_types import QAny, QBit, QDType
 
 
 class Side(enum.Flag):
@@ -48,7 +51,9 @@ class Register:
 
     Attributes:
         name: The string name of the register
-        bitsize: The number of (qu)bits in the register.
+        _bitsize: The number of (qu)bits in the register OR the quantum data type of the register.
+            If an integer is given it will be converted into either a QAny
+            dtype or QBit dtype (_bitsize = 1).
         shape: A tuple of integer dimensions to declare a multidimensional register. The
             total number of bits is the product of entries in this tuple times `bitsize`.
         side: Whether this is a left, right, or thru register. See the documentation for `Side`
@@ -56,11 +61,21 @@ class Register:
     """
 
     name: str
-    bitsize: int
+    _bitsize: Union[int, QDType] = field(
+        converter=lambda v: v if isinstance(v, QDType) else QBit() if v == 1 else QAny(v)
+    )
     shape: Tuple[int, ...] = field(
         default=tuple(), converter=lambda v: (v,) if isinstance(v, int) else tuple(v)
     )
     side: Side = Side.THRU
+
+    @property
+    def dtype(self) -> QDType:
+        return self._bitsize
+
+    @property
+    def bitsize(self) -> int:
+        return self.dtype.num_qubits
 
     def all_idxs(self) -> Iterable[Tuple[int, ...]]:
         """Iterate over all possible indices of a multidimensional register."""
@@ -72,6 +87,16 @@ class Register:
         This is the product of bitsize and each of the dimensions in `shape`.
         """
         return self.bitsize * int(np.prod(self.shape))
+
+    def adjoint(self) -> 'Register':
+        """Return the 'adjoint' of this register by switching RIGHT and LEFT registers."""
+        if self.side is Side.THRU:
+            return self
+        if self.side is Side.LEFT:
+            return attrs.evolve(self, side=Side.RIGHT)
+        if self.side is Side.RIGHT:
+            return attrs.evolve(self, side=Side.LEFT)
+        raise ValueError(f"Unknown side {self.side}")
 
 
 @frozen
@@ -120,7 +145,9 @@ class SelectionRegister(Register):
     """
 
     name: str
-    bitsize: int
+    _bitsize: Union[int, QDType] = field(
+        converter=lambda v: v if isinstance(v, QDType) else QBit() if v == 1 else QAny(v)
+    )
     iteration_length: int = field()
     shape: Tuple[int, ...] = field(
         converter=lambda v: (v,) if isinstance(v, int) else tuple(v), default=()
@@ -205,6 +232,10 @@ class Signature:
             groups[reg.name].append(reg)
 
         yield from groups.items()
+
+    def adjoint(self) -> 'Signature':
+        """Swap all RIGHT and LEFT registers in this collection."""
+        return Signature(reg.adjoint() for reg in self._registers)
 
     def __repr__(self):
         return f'Signature({repr(self._registers)})'

@@ -34,6 +34,7 @@ from qualtran import (
 )
 from qualtran.bloqs.util_bloqs import ArbitraryClifford
 from qualtran.cirq_interop.t_complexity_protocol import TComplexity
+from qualtran.drawing import Circle, TextBox, WireSymbol
 
 from .t_gate import TGate
 
@@ -162,6 +163,9 @@ class TwoBitCSwap(Bloq):
     def build_call_graph(self, ssa: 'SympySymbolAllocator') -> Set['BloqCountT']:
         return {(TGate(), 7), (ArbitraryClifford(n=3), 10)}
 
+    def adjoint(self) -> 'Bloq':
+        return self
+
 
 @frozen
 class CSwap(GateWithRegisters):
@@ -213,7 +217,7 @@ class CSwap(GateWithRegisters):
         raise ValueError("Bad control value for CSwap classical simulation.")
 
     def short_name(self) -> str:
-        return 'swap'
+        return r'$x\leftrightarrow y$'
 
     @classmethod
     def make_on(
@@ -229,8 +233,19 @@ class CSwap(GateWithRegisters):
             )
         return cirq.CircuitDiagramInfo(("@",) + ("×(x)",) * self.bitsize + ("×(y)",) * self.bitsize)
 
+    def wire_symbol(self, soq: 'Soquet') -> 'WireSymbol':
+        if soq.reg.name == 'x':
+            return TextBox('×(x)')
+        elif soq.reg.name == 'y':
+            return TextBox('×(y)')
+        else:
+            return Circle(filled=True)
+
     def _t_complexity_(self) -> TComplexity:
         return TComplexity(t=7 * self.bitsize, clifford=10 * self.bitsize)
+
+    def adjoint(self) -> 'Bloq':
+        return self
 
 
 @bloq_example
