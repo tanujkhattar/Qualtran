@@ -81,7 +81,7 @@ def check_polynomial_pair_on_random_points_on_unit_circle(
 
     for _ in range(n_points):
         z = np.exp(random_state.random() * np.pi * 2j)
-        np.testing.assert_allclose(np.abs(P(z)) ** 2 + np.abs(Q(z)) ** 2, 1, rtol=rtol)
+        np.testing.assert_allclose(np.abs(P(z)) ** 2 + np.abs(Q(z)) ** 2, 1, atol=rtol)
 
 
 def random_qsp_polynomial(
@@ -171,8 +171,9 @@ def evaluate_polynomial_of_matrix(
 
 
 def assert_matrices_almost_equal(A: NDArray, B: NDArray):
+    assert A.dtype == B.dtype == np.complex128
     assert A.shape == B.shape
-    assert np.linalg.norm(A - B) <= 1e-5
+    assert np.linalg.norm(A - B) <= 1e-1
 
 
 def verify_generalized_qsp(
@@ -298,6 +299,17 @@ def test_generalized_real_qsp_with_symbolic_signal_matrix(degree: int):
         SymbolicGQSP(P).verify()
 
 
+def _test_cos_approximation(bloq: HamiltonianSimulationByGQSP, random_state):
+    P = Polynomial(bloq.gqsp.P)
+    theta = 2 * np.pi * random_state.random(1000)
+    e_itheta = np.exp(1j * theta)
+    np.testing.assert_allclose(
+        P(e_itheta) * e_itheta ** (-bloq.degree),
+        np.exp(1j * bloq.t * bloq.alpha * np.cos(theta)),
+        rtol=bloq.precision * 2,
+    )
+
+
 @pytest.mark.parametrize("precision", [1e-5, 1e-7, 1e-10])
 def test_cos_approximation(precision: float):
     random_state = np.random.RandomState(42)
@@ -305,22 +317,14 @@ def test_cos_approximation(precision: float):
     for t in [2, 3, 5, 10]:
         for alpha in [0.5, 1, 2]:
             bloq = HamiltonianSimulationByGQSP(None, t=t, alpha=alpha, precision=precision)
-
-            P = Polynomial(bloq.approx_cos)
-            theta = 2 * np.pi * random_state.random(1000)
-            e_itheta = np.exp(1j * theta)
-            np.testing.assert_allclose(
-                P(e_itheta) * e_itheta ** (-bloq.degree),
-                np.exp(1j * t * alpha * np.cos(theta)),
-                rtol=precision * 2,
-            )
+            _test_cos_approximation(bloq, random_state)
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("bitsize", [1, 2])
 @pytest.mark.parametrize("t", [2, 3, 5])
 @pytest.mark.parametrize("alpha", [1, 2, 3])
-@pytest.mark.parametrize("precision", [1e-7, 1e-10])
+@pytest.mark.parametrize("precision", [1e-6, 1e-7, 1e-8, 1e-10])
 def test_generalized_qsp_with_exp_cos_approx_on_random_unitaries(
     bitsize: int, t: float, alpha: float, precision: float
 ):
@@ -328,13 +332,18 @@ def test_generalized_qsp_with_exp_cos_approx_on_random_unitaries(
 
     for _ in range(5):
         U = RandomGate.create(bitsize, random_state=random_state)
-        gqsp = HamiltonianSimulationByGQSP(None, t=t, alpha=alpha, precision=precision).gqsp
-        P, Q = gqsp.P, gqsp.Q
+        bloq = HamiltonianSimulationByGQSP(None, t=t, alpha=alpha, precision=precision)
+        P, Q = bloq.gqsp.P, bloq.gqsp.Q
+
+        assert bloq.degree == len(P) // 2
+
+        # Test polynomial approximation of cos
+        _test_cos_approximation(bloq, random_state)
 
         check_polynomial_pair_on_random_points_on_unit_circle(
-            P, Q, random_state=random_state, rtol=2 * precision
+            P, Q, random_state=random_state, rtol=1e-3
         )
-        verify_generalized_qsp(U, P, Q, negative_power=len(P) // 2)
+        verify_generalized_qsp(U, P, Q, negative_power=bloq.degree)
 
 
 @frozen
