@@ -11,6 +11,16 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
+import torch
+
+from torch.nn.functional import conv1d, pad
+from torch.fft import fft
+from torchaudio.transforms import Convolve, FFTConvolve
+import time
+import numpy as np
+from typing import Sequence
+
+
 from functools import cached_property
 from typing import Dict, Sequence, Set, Tuple, TYPE_CHECKING
 
@@ -79,7 +89,77 @@ class SU2RotationGate(Bloq):
         return {'q': q}
 
 
-def qsp_complementary_polynomial(
+def complex_conv_by_flip_conj(x):
+    real_part = x.real
+    imag_part = x.imag
+
+    real_flip = torch.flip(real_part, dims=[0])
+    imag_flip = torch.flip(-1 * imag_part, dims=[0])
+
+    conv_real_part = FFTConvolve("full").forward(real_part, real_flip)
+    conv_imag_part = FFTConvolve("full").forward(imag_part, imag_flip)
+
+    conv_real_imag = FFTConvolve("full").forward(real_part, imag_flip)
+    conv_imag_real = FFTConvolve("full").forward(imag_part, real_flip)
+
+    # Compute real and imaginary part of the convolution
+    real_conv = conv_real_part - conv_imag_part
+    imag_conv = conv_real_imag + conv_imag_real
+
+    # Combine to form the complex result
+    return torch.complex(real_conv, imag_conv)
+
+
+def objective_torch(x, P):
+    x.requires_grad = True
+
+    conv_result = complex_conv_by_flip_conj(torch.complex(x[: len(x) // 2], x[len(x) // 2 :]))
+
+    # Compute loss using squared distance function
+    loss = torch.norm(P - conv_result) ** 2
+    return loss
+
+
+def qsp_complementary_polynomial_optimize(
+    poly: Sequence[complex], *, verify: bool = False
+) -> Sequence[complex]:
+
+    # Use CUDA if available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    poly = torch.tensor(poly, dtype=torch.complex128)
+
+    # Normalize P
+    granularity = 2**25
+    P = pad(poly, (0, granularity - poly.shape[0]))
+    ft = fft(P)
+    P_norms = ft.abs()
+    poly /= torch.max(P_norms)
+
+    conv_p_negative = complex_conv_by_flip_conj(poly) * -1
+    conv_p_negative[poly.shape[0] - 1] = 1 - torch.norm(poly) ** 2
+
+    # Initializing Q randomly to start with
+    initial = torch.randn(poly.shape[0] * 2, device=device, requires_grad=True)
+    initial = (initial / torch.norm(initial)).clone().detach().requires_grad_(True)
+
+    optimizer = torch.optim.LBFGS([initial], max_iter=5000)
+
+    def closure():
+        optimizer.zero_grad()
+        loss = objective_torch(initial, conv_p_negative)
+        loss.backward()
+        return loss
+
+    optimizer.step(closure)
+
+    real_part = initial[: len(initial) // 2]
+    imag_part = initial[len(initial) // 2 :]
+
+    return (real_part + 1j * imag_part).detach().numpy()
+
+
+def qsp_complementary_polynomial_analytical(
     P: Sequence[complex], *, verify: bool = False
 ) -> Sequence[complex]:
     r"""Computes the Q polynomial given P
@@ -136,41 +216,7 @@ def qsp_complementary_polynomial(
         else:
             smaller_roots.append(r)
 
-    # pair up roots in `units`, claimed in Eq. 40 and the explanation preceding it.
-    # all unit roots must have even multiplicity.
-    paired_units: list[complex] = []
-    unpaired_units: list[complex] = []
-    for z in units:
-        matched_z = None
-        for w in unpaired_units:
-            if np.allclose(z, w):
-                matched_z = w
-                break
-
-        if matched_z is not None:
-            paired_units.append(z)
-            unpaired_units.remove(matched_z)
-        else:
-            unpaired_units.append(z)
-
-    unpaired_conj_units: list[complex] = []
-    for z in unpaired_units:
-        matched_z_conj = None
-        for w in unpaired_conj_units:
-            if np.allclose(z.conjugate(), w):
-                matched_z_conj = w
-                break
-
-        if matched_z_conj is not None:
-            smaller_roots.append(z)
-            larger_roots.append(matched_z_conj)
-            unpaired_conj_units.remove(matched_z_conj)
-        else:
-            unpaired_conj_units.append(z)
-
     if verify:
-        assert len(unpaired_conj_units) == 0
-
         # verify that the non-unit roots indeed occur in conjugate pairs.
         def assert_is_permutation(A, B):
             assert len(A) == len(B)
@@ -178,14 +224,43 @@ def qsp_complementary_polynomial(
             unmatched = []
             for z in B:
                 for w in A:
-                    if np.allclose(z, w, rtol=1e-5, atol=1e-5):
+                    if np.allclose(z, w):
                         A.remove(w)
                         break
                 else:
                     unmatched.append(z)
             assert len(unmatched) == 0
 
-        assert_is_permutation(smaller_roots, 1 / np.array(larger_roots).conj())
+        assert_is_permutation((1 / np.array(smaller_roots)).conj(), np.array(larger_roots))
+
+    print(len(roots), len(units), len(larger_roots), len(smaller_roots))
+    # pair up roots in `units`, claimed in Eq. 40 and the explanation preceding it.
+    # all unit roots must have even multiplicity.
+    paired_units: list[complex] = []
+    unpaired_units: list[complex] = []
+    for z in units:
+        for w in unpaired_units:
+            if np.allclose(z, w):
+                paired_units.append(z)
+                unpaired_units.remove(w)
+                break
+        else:
+            unpaired_units.append(z)
+
+    unpaired_conj_units: list[complex] = []
+    for z in unpaired_units:
+        for w in unpaired_conj_units:
+            if np.allclose(z.conjugate(), w):
+                smaller_roots.append(z)
+                larger_roots.append(w)
+                unpaired_conj_units.remove(w)
+                break
+        else:
+            unpaired_conj_units.append(z)
+
+    assert len(unpaired_conj_units) == 0
+    if verify:
+        assert len(unpaired_conj_units) == 0
 
     # Q = G \hat{G}, where
     # - \hat{G}^2 is the monomials which are unit roots of R, which occur in pairs.
@@ -201,6 +276,12 @@ def qsp_complementary_polynomial(
     Q = scaling_factor * Polynomial.fromroots(paired_units + smaller_roots)
 
     return Q.coef
+
+
+def qsp_complementary_polynomial(
+    P: Sequence[complex], *, verify: bool = False
+) -> Sequence[complex]:
+    return qsp_complementary_polynomial_analytical(P, verify=verify)
 
 
 def qsp_phase_factors(
@@ -294,7 +375,7 @@ class GeneralizedQSP(GateWithRegisters):
     def from_qsp_polynomial(
         cls, U: GateWithRegisters, P: Sequence[complex], *, negative_power: int = 0
     ) -> 'GeneralizedQSP':
-        Q = qsp_complementary_polynomial(P)
+        Q = qsp_complementary_polynomial(P, verify=True)
         return GeneralizedQSP(U, P, Q, negative_power=negative_power)
 
     @cached_property
@@ -383,7 +464,7 @@ class HamiltonianSimulationByGQSP(GateWithRegisters):
         d = 0
         while True:
             term = scipy.special.jv(d + 1, self.t * self.alpha)
-            if np.isclose(term, 0, atol=self.precision / 2):
+            if np.isclose(term, 0, atol=self.precision / 10):
                 break
             d += 1
         return d
