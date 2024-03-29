@@ -416,6 +416,7 @@ class AddScaledValIntoPhaseReg(GateWithRegisters, cirq.ArithmeticGate):
         return out['x'], out['phase_grad']
 
     def on_classical_vals(self, x: int, phase_grad: int) -> Dict[str, 'ClassicalValT']:
+        print(x, phase_grad)
         phase_grad_out = (phase_grad + self.scaled_val(x)) % 2**self.phase_bitsize
         return {'x': x, 'phase_grad': phase_grad_out}
 

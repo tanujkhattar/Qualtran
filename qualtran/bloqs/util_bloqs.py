@@ -76,8 +76,8 @@ class Split(Bloq):
     def _t_complexity_(self) -> 'TComplexity':
         return TComplexity()
 
-    def on_classical_vals(self, reg: int) -> Dict[str, 'ClassicalValT']:
-        return {'reg': ints_to_bits(np.array([reg]), self.dtype.num_qubits)[0]}
+    def on_classical_vals(self, reg: Any) -> Dict[str, 'ClassicalValT']:
+        return {'reg': np.array(self.dtype.to_bits(reg))}
 
     def add_my_tensors(
         self,
@@ -163,7 +163,7 @@ class Join(Bloq):
         )
 
     def on_classical_vals(self, reg: 'NDArray[np.uint8]') -> Dict[str, int]:
-        return {'reg': bits_to_ints(reg)[0]}
+        return {'reg': self.dtype.from_bits(reg.tolist())}
 
     def get_ctrl_system(
         self, ctrl_spec: Optional['AbstractCtrlSpec'] = None
@@ -434,9 +434,8 @@ class Cast(Bloq):
     )
 
     def __attrs_post_init__(self):
-        if isinstance(self.inp_dtype.bitsize, int):
-            if self.inp_dtype.num_qubits != self.out_dtype.num_qubits:
-                raise ValueError("Casting only permitted between same sized registers.")
+        if self.inp_dtype.num_qubits != self.out_dtype.num_qubits:
+            raise ValueError("Casting only permitted between same sized registers.")
 
     def adjoint(self) -> 'Bloq':
         return Cast(inp_dtype=self.out_dtype, out_dtype=self.inp_dtype)
@@ -466,9 +465,11 @@ class Cast(Bloq):
             )
         )
 
-    def on_classical_vals(self, reg: int) -> Dict[str, 'ClassicalValT']:
-        # TODO: Actually cast the values https://github.com/quantumlib/Qualtran/issues/734
-        return {'reg': reg}
+    def on_classical_vals(self, reg: 'ClassicalValT') -> Dict[str, 'ClassicalValT']:
+        def _cast(x):
+            return self.out_dtype.from_bits(self.inp_dtype.to_bits(x))
+
+        return {'reg': np.vectorize(_cast)(reg)}
 
     def _t_complexity_(self) -> 'TComplexity':
         return TComplexity()

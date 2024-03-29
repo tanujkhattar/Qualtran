@@ -151,7 +151,10 @@ def test_add_scaled_val_into_phase_reg(bloq):
     cbloq = bloq.decompose_bloq()
     for x in range(2**bloq.x_dtype.bitsize):
         for phase_grad in range(2**bloq.phase_bitsize):
-            d = {'x': x, 'phase_grad': phase_grad}
+            d = {
+                'x': x / 2**bloq.x_dtype.bitsize,
+                'phase_grad': phase_grad / 2**bloq.phase_bitsize,
+            }
             c1 = bloq.on_classical_vals(**d)
             c2 = cbloq.on_classical_vals(**d)
             assert c1 == c2, f'{d=}, {c1=}, {c2=}'
